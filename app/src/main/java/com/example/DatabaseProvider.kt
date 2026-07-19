@@ -18,7 +18,8 @@ object DatabaseProvider {
 
     val MIGRATION_2_3 = object : Migration(2, 3) {
         override fun migrate(db: SupportSQLiteDatabase) {
-            // Example migration for version 2 to 3
+            // Intentionally empty: version 2 and version 3 have the identical schema structure.
+            // This migration path is provided to gracefully support version bump with zero schema alterations.
         }
     }
 

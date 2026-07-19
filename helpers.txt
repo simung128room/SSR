@@ -1,0 +1,35 @@
+@Composable
+fun DrawerItem(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, showTrailingArrow: Boolean = false, onClick: () -> Unit) {
+    androidx.compose.material3.NavigationDrawerItem(
+        label = { 
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(text, color = if (selected) Color.White else Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium)
+                if (showTrailingArrow) {
+                    Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                }
+            }
+        },
+        selected = selected,
+        onClick = onClick,
+        icon = { Icon(icon, contentDescription = null, tint = if (selected) Color.White else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp)) },
+        colors = androidx.compose.material3.NavigationDrawerItemDefaults.colors(
+            selectedContainerColor = Color.White.copy(alpha = 0.1f),
+            unselectedContainerColor = Color.Transparent
+        ),
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).height(44.dp)
+    )
+}
+
+@Composable
+fun DrawerIconBox(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit = {}) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+    }
+}

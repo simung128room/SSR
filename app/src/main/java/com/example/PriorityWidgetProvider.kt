@@ -16,13 +16,19 @@ import kotlinx.coroutines.launch
 class PriorityWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        for (appWidgetId in appWidgetIds) {
-            updateAppWidget(context, appWidgetManager, appWidgetId)
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                for (appWidgetId in appWidgetIds) {
+                    updateAppWidgetSync(context, appWidgetManager, appWidgetId)
+                }
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
         if (intent.action == ACTION_COMPLETE_TASK) {
             // Protect against spoofing: ensure the intent is targeted to our package specifically
             if (intent.getPackage() != context.packageName) {
@@ -30,29 +36,36 @@ class PriorityWidgetProvider : AppWidgetProvider() {
             }
             val taskId = intent.getIntExtra(EXTRA_TASK_ID, -1)
             if (taskId != -1) {
+                val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
-                    val db = DatabaseProvider.getDatabase(context.applicationContext)
-                    val taskDao = db.taskDao()
-                    val tasks = taskDao.getPendingTasks().first()
-                    val task = tasks.find { it.id == taskId }
-                    if (task != null) {
-                        taskDao.updateTask(task.copy(isCompleted = true))
-                        NotificationHelper.cancelTaskReminder(context.applicationContext, taskId)
-                        
-                        // Force update all widgets
-                        val appWidgetManager = AppWidgetManager.getInstance(context)
-                        val thisAppWidgetComponentName = ComponentName(context.packageName, PriorityWidgetProvider::class.java.name)
-                        val appWidgetIds = appWidgetManager.getAppWidgetIds(thisAppWidgetComponentName)
-                        for (appWidgetId in appWidgetIds) {
-                            updateAppWidget(context, appWidgetManager, appWidgetId)
+                    try {
+                        val db = DatabaseProvider.getDatabase(context.applicationContext)
+                        val taskDao = db.taskDao()
+                        val tasks = taskDao.getPendingTasks().first()
+                        val task = tasks.find { it.id == taskId }
+                        if (task != null) {
+                            taskDao.updateTask(task.copy(isCompleted = true))
+                            NotificationHelper.cancelTaskReminder(context.applicationContext, taskId)
+                            
+                            // Force update all widgets
+                            val appWidgetManager = AppWidgetManager.getInstance(context)
+                            val thisAppWidgetComponentName = ComponentName(context.packageName, PriorityWidgetProvider::class.java.name)
+                            val appWidgetIds = appWidgetManager.getAppWidgetIds(thisAppWidgetComponentName)
+                            for (appWidgetId in appWidgetIds) {
+                                updateAppWidgetSync(context, appWidgetManager, appWidgetId)
+                            }
                         }
+                    } finally {
+                        pendingResult.finish()
                     }
                 }
             }
+        } else {
+            super.onReceive(context, intent)
         }
     }
 
-    private fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
+    private suspend fun updateAppWidgetSync(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
         val views = RemoteViews(context.packageName, R.layout.widget_priority)
         
         val intent = Intent(context, MainActivity::class.java)
@@ -64,7 +77,7 @@ class PriorityWidgetProvider : AppWidgetProvider() {
         )
         views.setOnClickPendingIntent(R.id.widget_task_name, pendingIntent)
 
-        CoroutineScope(Dispatchers.IO).launch {
+        try {
             val db = DatabaseProvider.getDatabase(context.applicationContext)
             val tasks = db.taskDao().getPendingTasks().first()
             
@@ -127,6 +140,8 @@ class PriorityWidgetProvider : AppWidgetProvider() {
             }
             
             appWidgetManager.updateAppWidget(appWidgetId, views)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

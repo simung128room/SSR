@@ -92,9 +92,9 @@ object RetrofitClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
     val service: GeminiApiService by lazy {

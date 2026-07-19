@@ -13,6 +13,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,8 +35,18 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardVoice
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Close
@@ -70,6 +81,41 @@ fun EnergyLevel.toThaiString(): String = when(this) {
     EnergyLevel.HIGH -> "มาก"
 }
 
+@Composable
+fun DrawerItem(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, showTrailingArrow: Boolean = false, onClick: () -> Unit) {
+    androidx.compose.material3.NavigationDrawerItem(
+        label = { 
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(text, color = if (selected) Color.White else Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium)
+                if (showTrailingArrow) {
+                    Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                }
+            }
+        },
+        selected = selected,
+        onClick = onClick,
+        icon = { Icon(icon, contentDescription = null, tint = if (selected) Color.White else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp)) },
+        colors = androidx.compose.material3.NavigationDrawerItemDefaults.colors(
+            selectedContainerColor = Color.White.copy(alpha = 0.1f),
+            unselectedContainerColor = Color.Transparent
+        ),
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).height(44.dp)
+    )
+}
+
+@Composable
+fun DrawerIconBox(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit = {}) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+    }
+}
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,11 +129,25 @@ class MainActivity : ComponentActivity() {
             PriorityTheme {
                 val viewModel: MainViewModel = viewModel(factory = factory)
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-                
+                val context = androidx.compose.ui.platform.LocalContext.current
+
+                var isNotificationPermissionGranted by remember {
+                    mutableStateOf(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        } else {
+                            true
+                        }
+                    )
+                }
+
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission(),
                     onResult = { isGranted ->
-                        // Handle if needed
+                        isNotificationPermissionGranted = isGranted
                     }
                 )
 
@@ -105,7 +165,7 @@ class MainActivity : ComponentActivity() {
                 var taskToAnalyze by remember { mutableStateOf<TaskEntity?>(null) }
                 var showAuthErrorDialog by remember { mutableStateOf(false) }
                 var showProfileDialog by remember { mutableStateOf(false) }
-                val context = androidx.compose.ui.platform.LocalContext.current
+                val drawerState = androidx.compose.material3.rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
 
                 val gso = remember {
                     val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -168,6 +228,8 @@ class MainActivity : ComponentActivity() {
                         )
                         if (result == SnackbarResult.ActionPerformed) {
                             viewModel.restoreTask(task)
+                        } else {
+                            deleteLocalImage(task.imagePath)
                         }
                     }
                 }
@@ -175,66 +237,220 @@ class MainActivity : ComponentActivity() {
                 var activeTab by remember { mutableStateOf(0) }
                 LaunchedEffect(uiState.userEnergy, uiState.selectedDateMs, uiState.pendingTasks.size) {
                     if (uiState.pendingTasks.isNotEmpty()) {
+                        kotlinx.coroutines.delay(1500)
                         viewModel.fetchDailyBriefing(uiState.pendingTasks)
                     }
                 }
 
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-                    floatingActionButton = {
-                        FloatingActionButton(
-                            onClick = { 
-                                taskToEdit = null
-                                showAddTaskDialog = true 
-                            },
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            shape = CircleShape
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Add Task")
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                ) {
+                    androidx.compose.material3.ModalNavigationDrawer(
+                        drawerState = drawerState,
+                        drawerContent = {
+                            androidx.compose.material3.ModalDrawerSheet(
+                                drawerContainerColor = Color(0xFF141414),
+                                modifier = Modifier.width(300.dp)
+                            ) {
+                                Spacer(Modifier.height(16.dp))
+                                
+                                // Header
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "SkLife",
+                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White
+                                    )
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color.White.copy(alpha = 0.5f))
+                                }
+                                
+                                Spacer(Modifier.height(16.dp))
+                                
+                                // Explore Section
+                                Text("EXPLORE", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.5f))
+                                DrawerItem("หน้าแรก", Icons.Default.Home, true) { coroutineScope.launch { drawerState.close() } }
+                                DrawerItem("ประวัติ", Icons.Default.History, false) { coroutineScope.launch { drawerState.close() } }
+                                
+                                Spacer(Modifier.height(16.dp))
+                                
+                                // Build Section
+                                Text("BUILD", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.5f))
+                                // Custom New App Button
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.1f))
+                                        .clickable { showAddTaskDialog = true; coroutineScope.launch { drawerState.close() } }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("เพิ่มงานใหม่", color = Color.White, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                                }
+                                
+                                DrawerItem("งานของฉัน", Icons.Default.List, false) { coroutineScope.launch { drawerState.close() } }
+                                DrawerItem("แกลเลอรี", Icons.Default.PhotoLibrary, false) { coroutineScope.launch { drawerState.close() } }
+                                
+                                Spacer(Modifier.height(16.dp))
+                                
+                                // Manage Section
+                                Text("MANAGE", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.5f))
+                                DrawerItem("แดชบอร์ด", Icons.Default.PieChart, false, showTrailingArrow = true) { coroutineScope.launch { drawerState.close() } }
+                                DrawerItem("คู่มือการใช้งาน", Icons.Default.OpenInNew, false) { coroutineScope.launch { drawerState.close() } }
+                                
+                                Spacer(Modifier.weight(1f))
+                                
+                                // Promo Card
+                                Box(
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xFF1E3A8A).copy(alpha=0.2f), Color(0xFF047857).copy(alpha=0.2f))))
+                                        .border(1.dp, androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xFF3B82F6).copy(alpha=0.5f), Color(0xFF10B981).copy(alpha=0.5f))), RoundedCornerShape(16.dp))
+                                        .padding(16.dp)
+                                ) {
+                                    Column {
+                                        Text("Upgrade to unlock more", color = Color.White, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("Access higher limits, Pro models, and more.", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                
+                                // Bottom Icons
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    DrawerIconBox(Icons.Default.Notifications)
+                                    DrawerIconBox(Icons.Default.Settings) { coroutineScope.launch { drawerState.close(); showProfileDialog = true } }
+                                    DrawerIconBox(Icons.Default.Search)
+                                    DrawerIconBox(Icons.Default.VpnKey)
+                                }
+                                
+                                // User Email
+                                Box(
+                                    modifier = Modifier
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .padding(bottom = 16.dp)
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.White.copy(alpha = 0.05f))
+                                        .padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        uiState.userProfile.displayName ?: "guest@sklife.app",
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
                         }
-                    },
-                    containerColor = MaterialTheme.colorScheme.background
-                ) { innerPadding ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                            .padding(horizontal = 24.dp)
                     ) {
-                        Spacer(modifier = Modifier.height(32.dp))
-                        Row(
+                        Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+                        floatingActionButtonPosition = androidx.compose.material3.FabPosition.Center,
+                        floatingActionButton = {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp)
+                                    .clip(RoundedCornerShape(32.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .border(
+                                        width = 1.dp,
+                                        color = Color.White.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(32.dp)
+                                    )
+                                    .clickable {
+                                        taskToEdit = null
+                                        showAddTaskDialog = true
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Add Task", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    "เพิ่มงานใหม่...",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                Icon(Icons.Default.KeyboardVoice, contentDescription = "Voice input", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(24.dp))
+                            }
+                        },
+                        containerColor = androidx.compose.ui.graphics.Color.Transparent
+                    ) { innerPadding ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                                .padding(horizontal = 24.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(32.dp))
+                            Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box {
-                                    // Use a safe approach to load the image
-                                    Image(
-                                        painter = painterResource(id = R.drawable.app_icon_image),
-                                        contentDescription = "SkLife Logo",
-                                        modifier = Modifier
-                                            .size(44.dp)
-                                            .clip(RoundedCornerShape(12.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Hamburger Menu
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                                        .clickable { coroutineScope.launch { drawerState.open() } },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Menu,
+                                        contentDescription = "Menu",
+                                        tint = Color.White.copy(alpha = 0.8f),
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = "SkLife",
-                                    style = MaterialTheme.typography.headlineLarge.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
+                                
+                                // SkLife Label
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(24.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(24.dp))
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "SkLife",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White.copy(alpha = 0.8f)
+                                    )
+                                }
                             }
                             
                             if (uiState.userProfile.isLoggedIn) {
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(44.dp)
                                         .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primaryContainer)
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
                                         .clickable { showProfileDialog = true },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -242,7 +458,7 @@ class MainActivity : ComponentActivity() {
                                         coil.compose.AsyncImage(
                                             model = uiState.userProfile.photoUrl,
                                             contentDescription = "Profile Photo",
-                                            modifier = Modifier.fillMaxSize(),
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
                                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                         )
                                     } else {
@@ -250,7 +466,7 @@ class MainActivity : ComponentActivity() {
                                         Text(
                                             text = initials.uppercase(),
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            color = Color.White.copy(alpha = 0.8f)
                                         )
                                     }
                                 }
@@ -270,46 +486,121 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        containerColor = Color.White.copy(alpha = 0.08f),
+                                        contentColor = Color.White.copy(alpha = 0.8f)
                                     ),
-                                    shape = RoundedCornerShape(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                    modifier = Modifier.height(40.dp)
+                                    shape = RoundedCornerShape(24.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                    modifier = Modifier.height(44.dp).border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(24.dp))
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.AccountCircle,
                                         contentDescription = "Google Sign-In",
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(20.dp),
+                                        tint = Color.White.copy(alpha = 0.8f)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        "ลงชื่อเข้าใช้", 
-                                        style = MaterialTheme.typography.bodyMedium, 
-                                        fontWeight = FontWeight.Bold
+                                        "ลงชื่อเข้าใช้",
+                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                                     )
                                 }
                             }
                         }
+
+                        if (!isNotificationPermissionGranted) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Notifications,
+                                            contentDescription = "แจ้งเตือน",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                text = "ไม่ได้เปิดสิทธิ์การแจ้งเตือน",
+                                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onErrorContainer
+                                            )
+                                            Text(
+                                                text = "แอปจะไม่สามารถแจ้งเตือนงานเร่งด่วนเมื่อถึงเวลาได้",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    TextButton(
+                                        onClick = {
+                                            try {
+                                                val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                                                }
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+                                        }
+                                    ) {
+                                        Text("ตั้งค่าสิทธิ์", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
                         
-                        TabRow(
-                            selectedTabIndex = activeTab,
-                            containerColor = Color.Transparent,
-                            contentColor = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Tab(
-                                selected = activeTab == 0,
-                                onClick = { activeTab = 0 },
-                                text = { Text("ตารางงาน", fontWeight = FontWeight.Bold) },
-                                icon = { Icon(Icons.Default.DateRange, contentDescription = "ตารางงาน") }
+                            val tabs = listOf(
+                                "ตารางงาน" to Icons.Default.DateRange,
+                                "สถิติวิเคราะห์" to Icons.Default.List
                             )
-                            Tab(
-                                selected = activeTab == 1,
-                                onClick = { activeTab = 1 },
-                                text = { Text("สถิติวิเคราะห์", fontWeight = FontWeight.Bold) },
-                                icon = { Icon(Icons.Default.List, contentDescription = "สถิติวิเคราะห์") }
-                            )
+                            tabs.forEachIndexed { index, (title, icon) ->
+                                val isSelected = activeTab == index
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(24.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                            else Color.White.copy(alpha = 0.05f)
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                            else Color.White.copy(alpha = 0.1f),
+                                            shape = RoundedCornerShape(24.dp)
+                                        )
+                                        .clickable { activeTab = index }
+                                        .padding(vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(icon, contentDescription = title, tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(title, fontWeight = FontWeight.Bold, color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f))
+                                }
+                            }
                         }
                         
                         Spacer(modifier = Modifier.height(16.dp))
@@ -575,7 +866,9 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                }
+                } // Close Scaffold
+                    } // Close ModalNavigationDrawer
+                } // Close Box
 
                 if (showAddTaskDialog) {
                     TaskDialog(
@@ -587,6 +880,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onSaveTask = { title, isImportant, energy, category, startMs, endMs, deadlineMs, imgPath ->
                             if (taskToEdit != null) {
+                                val oldImgPath = taskToEdit?.imagePath
+                                if (oldImgPath != null && oldImgPath != imgPath) {
+                                    deleteLocalImage(oldImgPath)
+                                }
                                 viewModel.editTask(taskToEdit!!, title, isImportant, energy, category, startMs, endMs, deadlineMs, imgPath)
                             } else {
                                 viewModel.addTask(title, isImportant, energy, category, startMs, endMs, deadlineMs, imgPath)
@@ -673,14 +970,23 @@ fun DaySelector(days: List<DayModel>, selectedDateMs: Long, onDaySelected: (Long
     ) {
         items(days) { day ->
             val isSelected = day.timeMs == selectedDateMs
-            val containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            val contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+            val contentColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.White
             
             Column(
                 modifier = Modifier
                     .width(60.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(containerColor)
+                    .then(
+                        if (isSelected) {
+                            Modifier
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                        } else {
+                            Modifier
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+                        }
+                    )
                     .clickable { onDaySelected(day.timeMs) }
                     .padding(vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -728,23 +1034,36 @@ fun EnergySelector(currentEnergy: EnergyLevel, onEnergySelected: (EnergyLevel) -
                 EnergyLevel.MEDIUM -> Color(0xFFFF9800)
                 EnergyLevel.HIGH -> Color(0xFFF44336)
             }
-            FilterChip(
-                selected = isSelected,
-                onClick = { onEnergySelected(level) },
-                label = { Text(level.toThaiString()) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else tint
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        else Color.White.copy(alpha = 0.05f)
                     )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    .border(
+                        width = 1.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        else Color.White.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    .clickable { onEnergySelected(level) }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isSelected) MaterialTheme.colorScheme.primary else tint
                 )
-            )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = level.toThaiString(),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
         }
     }
 }
@@ -775,10 +1094,13 @@ fun RecommendedTaskCard(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            containerColor = Color.White.copy(alpha = 0.05f),
+            contentColor = Color.White
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = Color.White.copy(alpha = 0.1f)
+        )
     ) {
         Column(
             modifier = Modifier.padding(24.dp)
@@ -985,10 +1307,15 @@ fun BacklogTaskItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(20.dp)
+            )
             .clickable { onClick() }
-            .padding(12.dp),
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = { onComplete(task) }) {
@@ -1151,6 +1478,7 @@ fun TaskDialog(
     var isBreakdownLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
+    var hasDeadline by remember { mutableStateOf(editingTask?.deadlineMs != null || editingTask == null) }
     var deadlineMs by remember { mutableStateOf(editingTask?.deadlineMs ?: selectedDateMs) }
 
     LaunchedEffect(editingTask) {
@@ -1465,100 +1793,154 @@ fun TaskDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        val c = java.util.Calendar.getInstance().apply { timeInMillis = deadlineMs }
-                        android.app.DatePickerDialog(
-                            context,
-                            { _, year, month, dayOfMonth ->
-                                val newCal = java.util.Calendar.getInstance().apply {
-                                    timeInMillis = deadlineMs
-                                    set(java.util.Calendar.YEAR, year)
-                                    set(java.util.Calendar.MONTH, month)
-                                    set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
-                                }
-                                deadlineMs = newCal.timeInMillis
-                            },
-                            c.get(java.util.Calendar.YEAR),
-                            c.get(java.util.Calendar.MONTH),
-                            c.get(java.util.Calendar.DAY_OF_MONTH)
-                        ).show()
-                    }
-                    .padding(vertical = 8.dp)
+                    .clickable { hasDeadline = !hasDeadline }
+                    .padding(vertical = 4.dp)
             ) {
-                Checkbox(checked = hasTime, onCheckedChange = { hasTime = it })
+                Checkbox(
+                    checked = hasDeadline,
+                    onCheckedChange = { hasDeadline = it }
+                )
                 Icon(
                     imageVector = Icons.Default.DateRange,
                     contentDescription = null,
-                    tint = if (hasTime) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    tint = if (hasDeadline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Column {
-                    Text("จัดลงตารางเวลา ($dateString)", fontWeight = FontWeight.Bold)
-                    Text("แตะตรงนี้เพื่อเลือกวันที่อื่น 📅", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
+                Text("กำหนดวันส่งงาน (Deadline)", fontWeight = FontWeight.Bold)
             }
-            if (hasTime) {
-                Spacer(modifier = Modifier.height(8.dp))
+
+            if (hasDeadline) {
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val c = java.util.Calendar.getInstance().apply { timeInMillis = deadlineMs }
+                            android.app.DatePickerDialog(
+                                context,
+                                { _, year, month, dayOfMonth ->
+                                    val newCal = java.util.Calendar.getInstance().apply {
+                                        timeInMillis = deadlineMs
+                                        set(java.util.Calendar.YEAR, year)
+                                        set(java.util.Calendar.MONTH, month)
+                                        set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+                                    }
+                                    deadlineMs = newCal.timeInMillis
+                                },
+                                c.get(java.util.Calendar.YEAR),
+                                c.get(java.util.Calendar.MONTH),
+                                c.get(java.util.Calendar.DAY_OF_MONTH)
+                            ).show()
+                        }
+                        .padding(vertical = 8.dp)
+                        .padding(start = 16.dp)
                 ) {
-                    Button(
-                        onClick = {
-                            android.app.TimePickerDialog(context, { _, h, m ->
-                                startHour = h
-                                startMinute = m
-                            }, startHour, startMinute, true).show()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(String.format("เริ่ม: %02d:%02d", startHour, startMinute))
-                    }
-                    Text("-", fontWeight = FontWeight.Bold)
-                    Button(
-                        onClick = {
-                            android.app.TimePickerDialog(context, { _, h, m ->
-                                endHour = h
-                                endMinute = m
-                            }, endHour, endMinute, true).show()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(String.format("จบ: %02d:%02d", endHour, endMinute))
+                    Icon(
+                        imageVector = Icons.Default.DateRange,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                        Text("วันที่กำหนดส่ง: $dateString", fontWeight = FontWeight.SemiBold)
+                        Text("แตะเพื่อเปลี่ยนวันส่งงานอื่น 📅", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { hasTime = !hasTime }
+                        .padding(vertical = 8.dp)
+                        .padding(start = 16.dp)
+                ) {
+                    Checkbox(checked = hasTime, onCheckedChange = { hasTime = it })
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = null,
+                        tint = if (hasTime) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("จัดลงตารางเวลา (กำหนดเวลาเริ่ม-จบ) ⏰", fontWeight = FontWeight.SemiBold)
+                }
+
+                if (hasTime) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                android.app.TimePickerDialog(context, { _, h, m ->
+                                    startHour = h
+                                    startMinute = m
+                                }, startHour, startMinute, true).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(String.format("เริ่ม: %02d:%02d", startHour, startMinute))
+                        }
+                        Text("-", fontWeight = FontWeight.Bold)
+                        Button(
+                            onClick = {
+                                android.app.TimePickerDialog(context, { _, h, m ->
+                                    endHour = h
+                                    endMinute = m
+                                }, endHour, endMinute, true).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(String.format("จบ: %02d:%02d", endHour, endMinute))
+                        }
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "งานนี้จะไม่ระบุวันส่งงาน (จัดอยู่ในงานค้าง Someday) และจะแสดงผลทุกวันเพื่อรอทำ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 32.dp, bottom = 8.dp)
+                )
             }
             Spacer(modifier = Modifier.height(24.dp))
             Button(
                 onClick = { 
                     if (title.isNotBlank()) {
-                        val startMs = if (hasTime) {
+                        val finalDeadline = if (hasDeadline) deadlineMs else null
+                        val startMs = if (hasDeadline && hasTime) {
                             val c = java.util.Calendar.getInstance().apply { timeInMillis = deadlineMs }
                             c.set(java.util.Calendar.HOUR_OF_DAY, startHour)
                             c.set(java.util.Calendar.MINUTE, startMinute)
                             c.timeInMillis
                         } else null
-                        val endMs = if (hasTime) {
+                        val endMs = if (hasDeadline && hasTime) {
                             val c = java.util.Calendar.getInstance().apply { timeInMillis = deadlineMs }
                             c.set(java.util.Calendar.HOUR_OF_DAY, endHour)
                             c.set(java.util.Calendar.MINUTE, endMinute)
                             c.timeInMillis
                         } else null
-                        onSaveTask(title, isImportant, energyRequired, category, startMs, endMs, deadlineMs, imagePath) 
+                        onSaveTask(title, isImportant, energyRequired, category, startMs, endMs, finalDeadline, imagePath) 
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -1588,25 +1970,38 @@ fun DailyBriefingCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            containerColor = Color.White.copy(alpha = 0.05f),
+            contentColor = Color.White
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = Color.White.copy(alpha = 0.1f)
         )
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = "AI",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = "AI",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "สรุปและแนะนำรายวันโดย AI",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -1616,30 +2011,36 @@ fun DailyBriefingCard(
                 IconButton(
                     onClick = onRefresh,
                     enabled = !isLoading,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "รีเฟรชสรุป AI",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxWidth().height(64.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 3.dp
+                    )
                 }
             } else {
                 Text(
                     text = briefing.ifBlank { "กดปุ่มรีเฟรชด้านบน เพื่อสรุปแผนงานและจัดสรรพลังงานสำหรับวิชากิจกรรมของคุณในวันนี้ด้วย AI!" },
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 22.sp
+                    lineHeight = 24.sp
                 )
             }
         }
@@ -1676,7 +2077,12 @@ fun InsightsDashboard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            containerColor = Color.White.copy(alpha = 0.05f),
+            contentColor = Color.White
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = Color.White.copy(alpha = 0.1f)
         )
     ) {
         Column(
@@ -1684,20 +2090,28 @@ fun InsightsDashboard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     "สรุปความสำเร็จและการใช้พลังงาน",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.tertiary
                 )
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             
             // Progress Indicator
             Box(
@@ -1846,6 +2260,18 @@ fun saveImageLocally(context: android.content.Context, uri: android.net.Uri): St
     } catch (e: Exception) {
         e.printStackTrace()
         null
+    }
+}
+
+fun deleteLocalImage(path: String?) {
+    if (path.isNullOrBlank()) return
+    try {
+        val file = java.io.File(path)
+        if (file.exists()) {
+            file.delete()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
 
@@ -2145,11 +2571,12 @@ fun UserProfileDialog(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    IconButton(onClick = onDismiss) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "ปิด",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -2272,11 +2699,12 @@ fun AuthErrorDialog(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    IconButton(onClick = onDismiss) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "ปิด",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
