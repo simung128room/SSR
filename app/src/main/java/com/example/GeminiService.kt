@@ -41,19 +41,9 @@ data class Part(
 )
 
 @Serializable
-data class ResponseFormat(
-    val text: ResponseFormatText? = null
-)
-
-@Serializable
-data class ResponseFormatText(
-    val mimeType: String,
-    val schema: JsonObject? = null
-)
-
-@Serializable
 data class GenerationConfig(
-    val responseFormat: ResponseFormat? = null,
+    val responseMimeType: String? = null,
+    val responseSchema: JsonObject? = null,
     val temperature: Float? = null,
     val topP: Float? = null,
     val topK: Int? = null
@@ -91,7 +81,7 @@ data class TaskBreakdownResult(
 )
 
 interface GeminiApiService {
-    @POST("v1beta/models/gemini-2.5-pro:generateContent")
+    @POST("v1beta/models/gemini-3.5-flash:generateContent")
     suspend fun generateContent(
         @Query("key") apiKey: String,
         @Body request: GenerateContentRequest
@@ -152,12 +142,8 @@ object GeminiService {
         val requestBody = GenerateContentRequest(
             contents = listOf(Content(parts = listOf(Part(text = prompt)))),
             generationConfig = GenerationConfig(
-                responseFormat = ResponseFormat(
-                    text = ResponseFormatText(
-                        mimeType = "application/json",
-                        schema = schema
-                    )
-                ),
+                responseMimeType = "application/json",
+                responseSchema = schema,
                 temperature = 0.2f
             ),
             systemInstruction = Content(parts = listOf(Part(text = "You are a smart academic task organizer. Categorize student tasks and evaluate details accurately.")))
@@ -223,12 +209,8 @@ object GeminiService {
         val requestBody = GenerateContentRequest(
             contents = listOf(Content(parts = listOf(Part(text = prompt)))),
             generationConfig = GenerationConfig(
-                responseFormat = ResponseFormat(
-                    text = ResponseFormatText(
-                        mimeType = "application/json",
-                        schema = schema
-                    )
-                ),
+                responseMimeType = "application/json",
+                responseSchema = schema,
                 temperature = 0.4f
             ),
             systemInstruction = Content(parts = listOf(Part(text = "You are a professional tutor and academic coach. Break down complex study topics or student assignments into highly practical, bite-sized tasks.")))

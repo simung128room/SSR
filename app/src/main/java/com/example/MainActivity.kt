@@ -108,10 +108,15 @@ class MainActivity : ComponentActivity() {
                 val context = androidx.compose.ui.platform.LocalContext.current
 
                 val gso = remember {
-                    GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                         .requestEmail()
                         .requestProfile()
-                        .build()
+                    
+                    val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
+                    if (webClientId.isNotEmpty()) {
+                        builder.requestIdToken(webClientId)
+                    }
+                    builder.build()
                 }
                 val googleSignInClient = remember {
                     try {
@@ -168,11 +173,9 @@ class MainActivity : ComponentActivity() {
                 }
 
                 var activeTab by remember { mutableStateOf(0) }
-                var hasLoadedBriefingBySelf by remember { mutableStateOf(false) }
-                LaunchedEffect(uiState.pendingTasks) {
-                    if (uiState.pendingTasks.isNotEmpty() && !hasLoadedBriefingBySelf) {
+                LaunchedEffect(uiState.userEnergy, uiState.selectedDateMs, uiState.pendingTasks.size) {
+                    if (uiState.pendingTasks.isNotEmpty()) {
                         viewModel.fetchDailyBriefing(uiState.pendingTasks)
-                        hasLoadedBriefingBySelf = true
                     }
                 }
 
@@ -393,13 +396,72 @@ class MainActivity : ComponentActivity() {
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     val remainingTasks = uiState.pendingTasks.filter { it.id != uiState.recommendedTask?.id }
-                                    val scheduledTasks = remainingTasks.filter { it.startTimeMs != null }.sortedBy { it.startTimeMs }
-                                    val backlogTasks = remainingTasks.filter { it.startTimeMs == null }
+                                    
+                                    val selectedCal = java.util.Calendar.getInstance().apply {
+                                        timeInMillis = uiState.selectedDateMs
+                                        set(java.util.Calendar.HOUR_OF_DAY, 0)
+                                        set(java.util.Calendar.MINUTE, 0)
+                                        set(java.util.Calendar.SECOND, 0)
+                                        set(java.util.Calendar.MILLISECOND, 0)
+                                    }
+                                    val selectedDayMidnight = selectedCal.timeInMillis
+
+                                    val isOverdue = { task: TaskEntity ->
+                                        if (task.deadlineMs == null) false
+                                        else {
+                                            val tCal = java.util.Calendar.getInstance().apply {
+                                                timeInMillis = task.deadlineMs
+                                                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                                                set(java.util.Calendar.MINUTE, 0)
+                                                set(java.util.Calendar.SECOND, 0)
+                                                set(java.util.Calendar.MILLISECOND, 0)
+                                            }
+                                            tCal.timeInMillis < selectedDayMidnight
+                                        }
+                                    }
+
+                                    val overdueTasks = remainingTasks.filter { isOverdue(it) }
+                                    val currentDayTasks = remainingTasks.filter { !isOverdue(it) }
+
+                                    val scheduledTasks = currentDayTasks.filter { it.startTimeMs != null }.sortedBy { it.startTimeMs }
+                                    val backlogTasks = currentDayTasks.filter { it.startTimeMs == null }
+
+                                    if (overdueTasks.isNotEmpty()) {
+                                        item {
+                                            Text(
+                                                "งานค้างจากวันก่อน ⚠️",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.padding(top = 8.dp)
+                                            )
+                                        }
+                                        items(
+                                            items = overdueTasks,
+                                            key = { it.id }
+                                        ) { task ->
+                                            BacklogTaskItem(
+                                                task = task,
+                                                modifier = Modifier.animateItem(),
+                                                onClick = {
+                                                    taskToEdit = task
+                                                    showAddTaskDialog = true
+                                                },
+                                                onComplete = handleComplete,
+                                                onDelete = handleDelete,
+                                                onImageClick = {
+                                                    activeViewerImagePath = task.imagePath
+                                                },
+                                                onAnalyzeClick = {
+                                                    taskToAnalyze = task
+                                                }
+                                            )
+                                        }
+                                    }
 
                                     if (scheduledTasks.isNotEmpty()) {
                                         item {
                                             Text(
-                                                "ตารางเวลา ⏰",
+                                                "ตารางเวลาวันนี้ ⏰",
                                                 style = MaterialTheme.typography.titleMedium,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.padding(top = 8.dp)
@@ -431,7 +493,7 @@ class MainActivity : ComponentActivity() {
                                     if (backlogTasks.isNotEmpty()) {
                                         item {
                                             Text(
-                                                "งานค้างสะสม 📌",
+                                                "งานประจำวัน 📌",
                                                 style = MaterialTheme.typography.titleMedium,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.padding(top = 16.dp)
@@ -523,19 +585,25 @@ class MainActivity : ComponentActivity() {
                             showAddTaskDialog = false 
                             taskToEdit = null
                         },
-                        onSaveTask = { title, isImportant, energy, category, startMs, endMs, imgPath ->
+                        onSaveTask = { title, isImportant, energy, category, startMs, endMs, deadlineMs, imgPath ->
                             if (taskToEdit != null) {
-                                viewModel.editTask(taskToEdit!!, title, isImportant, energy, category, startMs, endMs, uiState.selectedDateMs, imgPath)
+                                viewModel.editTask(taskToEdit!!, title, isImportant, energy, category, startMs, endMs, deadlineMs, imgPath)
                             } else {
-                                viewModel.addTask(title, isImportant, energy, category, startMs, endMs, uiState.selectedDateMs, imgPath)
+                                viewModel.addTask(title, isImportant, energy, category, startMs, endMs, deadlineMs, imgPath)
                             }
                             showAddTaskDialog = false
                             taskToEdit = null
                         },
-                        onBreakdownTask = { mainTitle ->
+                        onBreakdownTask = { mainTitle, onFinished ->
                             viewModel.breakdownTask(mainTitle, uiState.selectedDateMs) { success ->
-                                showAddTaskDialog = false
-                                taskToEdit = null
+                                onFinished(success)
+                                if (success) {
+                                    android.widget.Toast.makeText(context, "แตกงานย่อยด้วย AI สำเร็จแล้ว ✨", android.widget.Toast.LENGTH_LONG).show()
+                                    showAddTaskDialog = false
+                                    taskToEdit = null
+                                } else {
+                                    android.widget.Toast.makeText(context, "AI แตกงานย่อยไม่สำเร็จ กรุณาลองใหม่อีกครั้ง", android.widget.Toast.LENGTH_LONG).show()
+                                }
                             }
                         }
                     )
@@ -996,10 +1064,17 @@ fun BacklogTaskItem(
                             tint = MaterialTheme.colorScheme.secondary
                         )
                         Spacer(modifier = Modifier.width(4.dp))
+                        val startCal = java.util.Calendar.getInstance().apply { timeInMillis = task.startTimeMs!! }
+                        val endCal = java.util.Calendar.getInstance().apply { timeInMillis = task.endTimeMs!! }
+                        val timeStr = String.format(
+                            "%02d:%02d - %02d:%02d",
+                            startCal.get(java.util.Calendar.HOUR_OF_DAY),
+                            startCal.get(java.util.Calendar.MINUTE),
+                            endCal.get(java.util.Calendar.HOUR_OF_DAY),
+                            endCal.get(java.util.Calendar.MINUTE)
+                        )
                         Text(
-                            text = String.format("%02d:%02d - %02d:%02d", 
-                                (task.startTimeMs / 3600000L), (task.startTimeMs % 3600000L) / 60000L,
-                                (task.endTimeMs / 3600000L), (task.endTimeMs % 3600000L) / 60000L),
+                            text = timeStr,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary
                         )
@@ -1053,8 +1128,8 @@ fun TaskDialog(
     selectedDateMs: Long,
     editingTask: TaskEntity? = null,
     onDismiss: () -> Unit,
-    onSaveTask: (String, Boolean, EnergyLevel, String, Long?, Long?, String?) -> Unit,
-    onBreakdownTask: (String) -> Unit
+    onSaveTask: (String, Boolean, EnergyLevel, String, Long?, Long?, Long?, String?) -> Unit,
+    onBreakdownTask: (String, (Boolean) -> Unit) -> Unit
 ) {
     var title by remember { mutableStateOf(editingTask?.title ?: "") }
     var isImportant by remember { mutableStateOf(editingTask?.isImportant ?: false) }
@@ -1075,6 +1150,8 @@ fun TaskDialog(
     var isAiLoading by remember { mutableStateOf(false) }
     var isBreakdownLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    var deadlineMs by remember { mutableStateOf(editingTask?.deadlineMs ?: selectedDateMs) }
 
     LaunchedEffect(editingTask) {
         if (editingTask?.startTimeMs != null) {
@@ -1104,7 +1181,7 @@ fun TaskDialog(
     )
     
     val cal = java.util.Calendar.getInstance()
-    cal.timeInMillis = selectedDateMs
+    cal.timeInMillis = deadlineMs
     val dateString = "${cal.get(java.util.Calendar.DAY_OF_MONTH)}/${cal.get(java.util.Calendar.MONTH)+1}/${cal.get(java.util.Calendar.YEAR)}"
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -1194,7 +1271,9 @@ fun TaskDialog(
                         onClick = {
                             if (title.isNotBlank()) {
                                 isBreakdownLoading = true
-                                onBreakdownTask(title)
+                                onBreakdownTask(title) { success ->
+                                    isBreakdownLoading = false
+                                }
                             }
                         },
                         modifier = Modifier.weight(1.1f),
@@ -1382,7 +1461,30 @@ fun TaskDialog(
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val c = java.util.Calendar.getInstance().apply { timeInMillis = deadlineMs }
+                        android.app.DatePickerDialog(
+                            context,
+                            { _, year, month, dayOfMonth ->
+                                val newCal = java.util.Calendar.getInstance().apply {
+                                    timeInMillis = deadlineMs
+                                    set(java.util.Calendar.YEAR, year)
+                                    set(java.util.Calendar.MONTH, month)
+                                    set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+                                }
+                                deadlineMs = newCal.timeInMillis
+                            },
+                            c.get(java.util.Calendar.YEAR),
+                            c.get(java.util.Calendar.MONTH),
+                            c.get(java.util.Calendar.DAY_OF_MONTH)
+                        ).show()
+                    }
+                    .padding(vertical = 8.dp)
+            ) {
                 Checkbox(checked = hasTime, onCheckedChange = { hasTime = it })
                 Icon(
                     imageVector = Icons.Default.DateRange,
@@ -1391,7 +1493,10 @@ fun TaskDialog(
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("จัดลงตารางเวลา ($dateString)", fontWeight = FontWeight.Bold)
+                Column {
+                    Text("จัดลงตารางเวลา ($dateString)", fontWeight = FontWeight.Bold)
+                    Text("แตะตรงนี้เพื่อเลือกวันที่อื่น 📅", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
             }
             if (hasTime) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1442,18 +1547,18 @@ fun TaskDialog(
                 onClick = { 
                     if (title.isNotBlank()) {
                         val startMs = if (hasTime) {
-                            val c = java.util.Calendar.getInstance().apply { timeInMillis = selectedDateMs }
+                            val c = java.util.Calendar.getInstance().apply { timeInMillis = deadlineMs }
                             c.set(java.util.Calendar.HOUR_OF_DAY, startHour)
                             c.set(java.util.Calendar.MINUTE, startMinute)
                             c.timeInMillis
                         } else null
                         val endMs = if (hasTime) {
-                            val c = java.util.Calendar.getInstance().apply { timeInMillis = selectedDateMs }
+                            val c = java.util.Calendar.getInstance().apply { timeInMillis = deadlineMs }
                             c.set(java.util.Calendar.HOUR_OF_DAY, endHour)
                             c.set(java.util.Calendar.MINUTE, endMinute)
                             c.timeInMillis
                         } else null
-                        onSaveTask(title, isImportant, energyRequired, category, startMs, endMs, imagePath) 
+                        onSaveTask(title, isImportant, energyRequired, category, startMs, endMs, deadlineMs, imagePath) 
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -2155,6 +2260,7 @@ fun AuthErrorDialog(
                 modifier = Modifier
                     .padding(24.dp)
                     .fillMaxWidth()
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState())
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2162,7 +2268,7 @@ fun AuthErrorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "คำแนะนำการเข้าสู่ระบบ",
+                        "ตั้งค่าการเข้าสู่ระบบด้วย Google",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -2178,7 +2284,15 @@ fun AuthErrorDialog(
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Text(
-                    text = "ระบบตรวจพบความพยายามลงทะเบียนในสภาพแวดล้อม Sandbox หรืออุปกรณ์เสมือน (Virtual Device) ซึ่งมักติดขัดเนื่องจากการกำหนดค่า SHA-1 ใน Google Cloud Console\n\nหากคุณต้องการทดสอบฟีเจอร์ผู้ใช้และเข้าสู่ระบบเพื่อใช้งานส่วนบุคคล คุณสามารถใช้ระบบ 'ลงชื่อเข้าใช้แบบจำลอง' เพื่อจำลองผลลัพธ์จาก Google Account ได้ทันที!",
+                    text = "หากต้องการใช้ปุ่ม 'เข้าสู่ระบบด้วย Google' บนอุปกรณ์จริงหรือ Emulator คุณต้องกำหนดค่า OAuth Client ID ใน Google Cloud Console ดังนี้:\n\n" +
+                            "1️⃣ ไปที่ Google Cloud Console (https://console.cloud.google.com)\n" +
+                            "2️⃣ ไปที่ APIs & Services > Credentials\n" +
+                            "3️⃣ กดปุ่ม 'Create Credentials' > 'OAuth client ID'\n" +
+                            "4️⃣ เลือก Application Type เป็น 'Web application' (เพื่อขอ ID Token ในการยืนยันตัวตนแบบ Cross-Platform)\n" +
+                            "5️⃣ คัดลอก Client ID ที่ได้ นำไปใส่ในไฟล์ `.env` ที่โฟลเดอร์หลักของโปรเจกต์:\n" +
+                            "   `GOOGLE_WEB_CLIENT_ID=คีย์ของคุณ.apps.googleusercontent.com`\n" +
+                            "6️⃣ สำหรับ Android ต้องเพิ่ม SHA-1 ของ Keystore ใน Google Console เพื่อเปิดใช้งานระบบล็อกอินจากแอปโดยตรงด้วย\n\n" +
+                            "💡 สำหรับสภาพแวดล้อม Sandbox หรือขณะทดสอบระบบ คุณสามารถกดปุ่ม 'เข้าสู่ระบบจำลอง' ด้านล่างเพื่อจำลองผลลัพธ์จาก Google Account ได้ทันที!",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

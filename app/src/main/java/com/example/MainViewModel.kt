@@ -42,7 +42,15 @@ data class UiState(
 
 class MainViewModel(private val application: Application, private val repository: TaskRepository) : AndroidViewModel(application) {
 
-    private val userEnergy = MutableStateFlow(EnergyLevel.MEDIUM)
+    private val userEnergy = MutableStateFlow(
+        try {
+            val prefs = application.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+            val saved = prefs.getString("user_energy", null)
+            if (saved != null) EnergyLevel.valueOf(saved) else EnergyLevel.MEDIUM
+        } catch (e: Exception) {
+            EnergyLevel.MEDIUM
+        }
+    )
     private val dailyBriefingText = MutableStateFlow("")
     private val isBriefingLoading = MutableStateFlow(false)
     private val userProfile = MutableStateFlow(loadUserProfile())
@@ -160,6 +168,9 @@ class MainViewModel(private val application: Application, private val repository
 
     fun setEnergy(level: EnergyLevel) {
         userEnergy.value = level
+        val prefs = application.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("user_energy", level.name).apply()
+        PriorityWidgetProvider.triggerUpdate(application)
     }
 
     fun setSelectedDate(ms: Long) {

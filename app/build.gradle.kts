@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -17,7 +20,31 @@ android {
         versionCode = 1
         versionName = "1.0"
         
-        buildConfigField("String", "GEMINI_API_KEY", "\"${System.getenv("GEMINI_API_KEY") ?: ""}\"")
+        val geminiKey = project.providers.environmentVariable("GEMINI_API_KEY").orNull
+            ?: run {
+                val envFile = project.rootProject.file(".env")
+                if (envFile.exists()) {
+                    val props = Properties()
+                    FileInputStream(envFile).use { props.load(it) }
+                    props.getProperty("GEMINI_API_KEY") ?: ""
+                } else {
+                    ""
+                }
+            }
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
+
+        val googleWebClientId = project.providers.environmentVariable("GOOGLE_WEB_CLIENT_ID").orNull
+            ?: run {
+                val envFile = project.rootProject.file(".env")
+                if (envFile.exists()) {
+                    val props = Properties()
+                    FileInputStream(envFile).use { props.load(it) }
+                    props.getProperty("GOOGLE_WEB_CLIENT_ID") ?: ""
+                } else {
+                    ""
+                }
+            }
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
     }
 
     buildTypes {

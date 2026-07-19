@@ -24,6 +24,10 @@ class PriorityWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         if (intent.action == ACTION_COMPLETE_TASK) {
+            // Protect against spoofing: ensure the intent is targeted to our package specifically
+            if (intent.getPackage() != context.packageName) {
+                return
+            }
             val taskId = intent.getIntExtra(EXTRA_TASK_ID, -1)
             if (taskId != -1) {
                 CoroutineScope(Dispatchers.IO).launch {
@@ -64,10 +68,39 @@ class PriorityWidgetProvider : AppWidgetProvider() {
             val db = DatabaseProvider.getDatabase(context.applicationContext)
             val tasks = db.taskDao().getPendingTasks().first()
             
-            // Priority formula matching recommend logic
-            val task = tasks.maxByOrNull { 
-                var score = 0
-                if (it.isImportant) score += 1000
+            // Priority formula matching recommend logic exactly
+            val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+            val energyStr = prefs.getString("user_energy", null)
+            val currentEnergy = if (energyStr != null) {
+                try { EnergyLevel.valueOf(energyStr) } catch(e: Exception) { EnergyLevel.MEDIUM }
+            } else {
+                EnergyLevel.MEDIUM
+            }
+
+            val task = tasks.maxByOrNull { t ->
+                var score = 0.0
+
+                if (t.isImportant) score += 1000
+
+                if (t.deadlineMs != null) {
+                    val timeRemaining = t.deadlineMs - System.currentTimeMillis()
+                    if (timeRemaining < 0) {
+                        score += 2000
+                    } else if (timeRemaining < 24 * 60 * 60 * 1000) {
+                        score += 1500
+                    } else {
+                        score += 500
+                    }
+                }
+
+                score += when {
+                    currentEnergy == EnergyLevel.LOW && t.energyRequired == EnergyLevel.HIGH -> -1000
+                    currentEnergy == EnergyLevel.LOW && t.energyRequired == EnergyLevel.LOW -> +500
+                    currentEnergy == EnergyLevel.HIGH && t.energyRequired == EnergyLevel.HIGH -> +500
+                    currentEnergy == t.energyRequired -> +300
+                    else -> 0
+                }
+
                 score
             }
 
@@ -79,6 +112,7 @@ class PriorityWidgetProvider : AppWidgetProvider() {
                 val completeIntent = Intent(context, PriorityWidgetProvider::class.java).apply {
                     action = ACTION_COMPLETE_TASK
                     putExtra(EXTRA_TASK_ID, task.id)
+                    setPackage(context.packageName)
                 }
                 val completePendingIntent = PendingIntent.getBroadcast(
                     context,
