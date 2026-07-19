@@ -6,8 +6,8 @@ class TaskRepository(private val taskDao: TaskDao) {
     val pendingTasks: Flow<List<TaskEntity>> = taskDao.getPendingTasks()
     val completedTasks: Flow<List<TaskEntity>> = taskDao.getCompletedTasks()
 
-    suspend fun addTask(task: TaskEntity) {
-        taskDao.insertTask(task)
+    suspend fun addTask(task: TaskEntity): Long {
+        return taskDao.insertTask(task)
     }
 
     suspend fun updateTask(task: TaskEntity) {

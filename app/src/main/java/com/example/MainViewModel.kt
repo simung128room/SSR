@@ -1,5 +1,7 @@
 package com.example
 
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -19,18 +21,69 @@ data class DayModel(
     val isToday: Boolean
 )
 
+data class UserProfile(
+    val displayName: String?,
+    val email: String?,
+    val photoUrl: String?,
+    val isLoggedIn: Boolean = false
+)
+
 data class UiState(
     val pendingTasks: List<TaskEntity> = emptyList(),
     val completedTasks: List<TaskEntity> = emptyList(),
     val recommendedTask: TaskEntity? = null,
     val userEnergy: EnergyLevel = EnergyLevel.MEDIUM,
     val selectedDateMs: Long = 0L,
-    val days: List<DayModel> = emptyList()
+    val days: List<DayModel> = emptyList(),
+    val dailyBriefing: String = "",
+    val isBriefingLoading: Boolean = false,
+    val userProfile: UserProfile = UserProfile(null, null, null, false)
 )
 
-class MainViewModel(private val repository: TaskRepository) : ViewModel() {
+class MainViewModel(private val application: Application, private val repository: TaskRepository) : AndroidViewModel(application) {
 
     private val userEnergy = MutableStateFlow(EnergyLevel.MEDIUM)
+    private val dailyBriefingText = MutableStateFlow("")
+    private val isBriefingLoading = MutableStateFlow(false)
+    private val userProfile = MutableStateFlow(loadUserProfile())
+    
+    private fun loadUserProfile(): UserProfile {
+        val prefs = getApplication<Application>().getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+        val isLoggedIn = prefs.getBoolean("is_logged_in", false)
+        if (isLoggedIn) {
+            return UserProfile(
+                displayName = prefs.getString("display_name", null),
+                email = prefs.getString("email", null),
+                photoUrl = prefs.getString("photo_url", null),
+                isLoggedIn = true
+            )
+        }
+        return UserProfile(null, null, null, false)
+    }
+
+    fun signInUser(displayName: String?, email: String?, photoUrl: String?) {
+        val prefs = getApplication<Application>().getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putBoolean("is_logged_in", true)
+            putString("display_name", displayName)
+            putString("email", email)
+            putString("photo_url", photoUrl)
+            apply()
+        }
+        userProfile.value = UserProfile(displayName, email, photoUrl, true)
+    }
+
+    fun signOutUser() {
+        val prefs = getApplication<Application>().getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putBoolean("is_logged_in", false)
+            remove("display_name")
+            remove("email")
+            remove("photo_url")
+            apply()
+        }
+        userProfile.value = UserProfile(null, null, null, false)
+    }
     
     private val startOfToday: Long
     init {
@@ -69,8 +122,9 @@ class MainViewModel(private val repository: TaskRepository) : ViewModel() {
         repository.pendingTasks,
         repository.completedTasks,
         userEnergy,
-        selectedDateMs
-    ) { pending, completed, energy, dateMs ->
+        selectedDateMs,
+        combine(dailyBriefingText, isBriefingLoading, userProfile) { text, loading, profile -> Triple(text, loading, profile) }
+    ) { pending, completed, energy, dateMs, triple ->
         // For simplicity, we just filter tasks whose deadline is before or on selected date, 
         // or have no deadline. But to make the date selector useful, let's say tasks are assigned 
         // to a date if their deadline is on that date, OR they have no deadline (backlog).
@@ -93,7 +147,10 @@ class MainViewModel(private val repository: TaskRepository) : ViewModel() {
             recommendedTask = calculateRecommendedTask(tasksForDate, energy),
             userEnergy = energy,
             selectedDateMs = dateMs,
-            days = generateDays()
+            days = generateDays(),
+            dailyBriefing = triple.first,
+            isBriefingLoading = triple.second,
+            userProfile = triple.third
         )
     }.stateIn(
         scope = viewModelScope,
@@ -109,37 +166,72 @@ class MainViewModel(private val repository: TaskRepository) : ViewModel() {
         selectedDateMs.value = ms
     }
 
-    fun addTask(title: String, isImportant: Boolean, energyRequired: EnergyLevel, category: String, startTimeMs: Long?, endTimeMs: Long?, deadlineMs: Long?) {
+    fun addTask(title: String, isImportant: Boolean, energyRequired: EnergyLevel, category: String, startTimeMs: Long?, endTimeMs: Long?, deadlineMs: Long?, imagePath: String?) {
         viewModelScope.launch {
-            repository.addTask(
-                TaskEntity(
-                    title = title,
-                    isImportant = isImportant,
-                    energyRequired = energyRequired,
-                    category = category,
-                    startTimeMs = startTimeMs,
-                    endTimeMs = endTimeMs,
-                    deadlineMs = deadlineMs
-                )
+            val task = TaskEntity(
+                title = title,
+                isImportant = isImportant,
+                energyRequired = energyRequired,
+                category = category,
+                startTimeMs = startTimeMs,
+                endTimeMs = endTimeMs,
+                deadlineMs = deadlineMs,
+                imagePath = imagePath
             )
+            val id = repository.addTask(task)
+            NotificationHelper.scheduleTaskReminder(getApplication(), task.copy(id = id.toInt()))
+            PriorityWidgetProvider.triggerUpdate(getApplication())
+        }
+    }
+
+    fun editTask(task: TaskEntity, title: String, isImportant: Boolean, energyRequired: EnergyLevel, category: String, startTimeMs: Long?, endTimeMs: Long?, deadlineMs: Long?, imagePath: String?) {
+        viewModelScope.launch {
+            val updatedTask = task.copy(
+                title = title,
+                isImportant = isImportant,
+                energyRequired = energyRequired,
+                category = category,
+                startTimeMs = startTimeMs,
+                endTimeMs = endTimeMs,
+                deadlineMs = deadlineMs,
+                imagePath = imagePath
+            )
+            repository.updateTask(updatedTask)
+            NotificationHelper.scheduleTaskReminder(getApplication(), updatedTask)
+            PriorityWidgetProvider.triggerUpdate(getApplication())
         }
     }
 
     fun markTaskCompleted(task: TaskEntity) {
         viewModelScope.launch {
             repository.updateTask(task.copy(isCompleted = true))
+            NotificationHelper.cancelTaskReminder(getApplication(), task.id)
+            PriorityWidgetProvider.triggerUpdate(getApplication())
         }
     }
     
     fun unmarkTaskCompleted(task: TaskEntity) {
         viewModelScope.launch {
-            repository.updateTask(task.copy(isCompleted = false))
+            val updatedTask = task.copy(isCompleted = false)
+            repository.updateTask(updatedTask)
+            NotificationHelper.scheduleTaskReminder(getApplication(), updatedTask)
+            PriorityWidgetProvider.triggerUpdate(getApplication())
         }
     }
 
-    fun deleteTask(id: Int) {
+    fun deleteTask(task: TaskEntity) {
         viewModelScope.launch {
-            repository.deleteTask(id)
+            repository.deleteTask(task.id)
+            NotificationHelper.cancelTaskReminder(getApplication(), task.id)
+            PriorityWidgetProvider.triggerUpdate(getApplication())
+        }
+    }
+
+    fun restoreTask(task: TaskEntity) {
+        viewModelScope.launch {
+            repository.addTask(task)
+            NotificationHelper.scheduleTaskReminder(getApplication(), task)
+            PriorityWidgetProvider.triggerUpdate(getApplication())
         }
     }
 
@@ -173,13 +265,69 @@ class MainViewModel(private val repository: TaskRepository) : ViewModel() {
             score
         }
     }
+
+    fun fetchDailyBriefing(tasks: List<TaskEntity>) {
+        viewModelScope.launch {
+            isBriefingLoading.value = true
+            try {
+                val briefing = GeminiService.getDailyBriefing(tasks, userEnergy.value)
+                dailyBriefingText.value = briefing
+            } catch (e: Exception) {
+                dailyBriefingText.value = "ไม่สามารถเชื่อมต่อผู้ช่วย AI ได้: ${e.message}"
+            } finally {
+                isBriefingLoading.value = false
+            }
+        }
+    }
+
+    fun suggestTaskMetadata(title: String, onResult: (AutoSuggestResult?) -> Unit) {
+        viewModelScope.launch {
+            val result = GeminiService.autoSuggestTask(title)
+            onResult(result)
+        }
+    }
+
+    fun breakdownTask(title: String, deadlineMs: Long, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val subtasks = GeminiService.breakdownTask(title)
+            if (subtasks != null && subtasks.isNotEmpty()) {
+                var currentStartMs = deadlineMs + 9 * 60 * 60 * 1000 // Start at 9:00 AM on selected date
+                for (subtask in subtasks) {
+                    val energy = try {
+                        EnergyLevel.valueOf(subtask.energyRequired.uppercase())
+                    } catch (e: Exception) {
+                        EnergyLevel.MEDIUM
+                    }
+                    val endMs = currentStartMs + subtask.durationMinutes * 60 * 1000
+                    
+                    val task = TaskEntity(
+                        title = subtask.title,
+                        isImportant = false,
+                        energyRequired = energy,
+                        category = subtask.category,
+                        startTimeMs = currentStartMs,
+                        endTimeMs = endMs,
+                        deadlineMs = deadlineMs
+                    )
+                    val id = repository.addTask(task)
+                    NotificationHelper.scheduleTaskReminder(getApplication(), task.copy(id = id.toInt()))
+                    
+                    currentStartMs = endMs + 10 * 60 * 1000 // 10 minutes break
+                }
+                PriorityWidgetProvider.triggerUpdate(getApplication())
+                onResult(true)
+            } else {
+                onResult(false)
+            }
+        }
+    }
 }
 
-class MainViewModelFactory(private val repository: TaskRepository) : ViewModelProvider.Factory {
+class MainViewModelFactory(private val application: Application, private val repository: TaskRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return MainViewModel(repository) as T
+            return MainViewModel(application, repository) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

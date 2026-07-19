@@ -18,5 +18,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Priority"
+rootProject.name = "SkLife"
 include(":app")

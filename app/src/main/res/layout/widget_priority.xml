@@ -4,24 +4,43 @@
     android:layout_height="match_parent"
     android:background="#001D36"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="12dp">
 
     <TextView
         android:id="@+id/widget_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="ควรทำสิ่งนี้ตอนนี้"
+        android:text="ควรทำสิ่งนี้ตอนนี้ 🎯"
         android:textColor="#90CAF9"
-        android:textSize="14sp"
+        android:textSize="11sp"
         android:textStyle="bold" />
 
-    <TextView
-        android:id="@+id/widget_task_name"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="กำลังโหลด..."
-        android:textColor="#FFFFFF"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="4dp">
+
+        <TextView
+            android:id="@+id/widget_task_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="กำลังโหลด..."
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/widget_complete_btn"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:text="✓"
+            android:textColor="#001D36"
+            android:background="#90CAF9"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:layout_marginStart="8dp" />
+    </LinearLayout>
 </LinearLayout>

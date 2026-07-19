@@ -3,19 +3,48 @@ package com.example
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.view.View
 import android.widget.RemoteViews
-import androidx.room.Room
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class PriorityWidgetProvider : AppWidgetProvider() {
+
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (appWidgetId in appWidgetIds) {
             updateAppWidget(context, appWidgetManager, appWidgetId)
+        }
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        if (intent.action == ACTION_COMPLETE_TASK) {
+            val taskId = intent.getIntExtra(EXTRA_TASK_ID, -1)
+            if (taskId != -1) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    val db = DatabaseProvider.getDatabase(context.applicationContext)
+                    val taskDao = db.taskDao()
+                    val tasks = taskDao.getPendingTasks().first()
+                    val task = tasks.find { it.id == taskId }
+                    if (task != null) {
+                        taskDao.updateTask(task.copy(isCompleted = true))
+                        NotificationHelper.cancelTaskReminder(context.applicationContext, taskId)
+                        
+                        // Force update all widgets
+                        val appWidgetManager = AppWidgetManager.getInstance(context)
+                        val thisAppWidgetComponentName = ComponentName(context.packageName, PriorityWidgetProvider::class.java.name)
+                        val appWidgetIds = appWidgetManager.getAppWidgetIds(thisAppWidgetComponentName)
+                        for (appWidgetId in appWidgetIds) {
+                            updateAppWidget(context, appWidgetManager, appWidgetId)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -23,23 +52,62 @@ class PriorityWidgetProvider : AppWidgetProvider() {
         val views = RemoteViews(context.packageName, R.layout.widget_priority)
         
         val intent = Intent(context, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         views.setOnClickPendingIntent(R.id.widget_task_name, pendingIntent)
 
         CoroutineScope(Dispatchers.IO).launch {
-            val db = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "priority-db").fallbackToDestructiveMigration().build()
+            val db = DatabaseProvider.getDatabase(context.applicationContext)
             val tasks = db.taskDao().getPendingTasks().first()
             
+            // Priority formula matching recommend logic
             val task = tasks.maxByOrNull { 
                 var score = 0
-                if (it.isImportant) score += 10
+                if (it.isImportant) score += 1000
                 score
             }
 
-            val taskName = task?.title ?: "ไม่มีงานเร่งด่วน พักผ่อนได้"
-            views.setTextViewText(R.id.widget_task_name, taskName)
+            if (task != null) {
+                views.setTextViewText(R.id.widget_task_name, task.title)
+                views.setViewVisibility(R.id.widget_complete_btn, View.VISIBLE)
+                
+                // Set up pending intent for the complete button
+                val completeIntent = Intent(context, PriorityWidgetProvider::class.java).apply {
+                    action = ACTION_COMPLETE_TASK
+                    putExtra(EXTRA_TASK_ID, task.id)
+                }
+                val completePendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    task.id,
+                    completeIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                views.setOnClickPendingIntent(R.id.widget_complete_btn, completePendingIntent)
+            } else {
+                views.setTextViewText(R.id.widget_task_name, "ไม่มีงานเร่งด่วน พักผ่อนได้ 🎉")
+                views.setViewVisibility(R.id.widget_complete_btn, View.GONE)
+            }
             
             appWidgetManager.updateAppWidget(appWidgetId, views)
+        }
+    }
+
+    companion object {
+        const val ACTION_COMPLETE_TASK = "com.example.ACTION_COMPLETE_TASK"
+        const val EXTRA_TASK_ID = "com.example.EXTRA_TASK_ID"
+
+        fun triggerUpdate(context: Context) {
+            val intent = Intent(context, PriorityWidgetProvider::class.java).apply {
+                action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+            }
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, PriorityWidgetProvider::class.java))
+            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+            context.sendBroadcast(intent)
         }
     }
 }

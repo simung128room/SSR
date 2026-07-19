@@ -18,5 +18,6 @@ data class TaskEntity(
     val startTimeMs: Long? = null,
     val endTimeMs: Long? = null,
     val isCompleted: Boolean = false,
+    val imagePath: String? = null,
     val createdAtMs: Long = System.currentTimeMillis()
 )
